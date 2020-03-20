@@ -4,6 +4,8 @@
 Validates whether all acquisitions are localized over an input AOI and track
 '''
 from __future__ import print_function
+from builtins import map
+from builtins import range
 import os
 import re
 import json
@@ -30,20 +32,28 @@ def main(aoi_id, aoi_index, acq_index, track_number):
     #get scihub acquisitions
     print('querying scihub...')
     scihub_ids = get_scihub_objects(aoi, track_number)
-    print('found {} total scihub ids.'.format(len(scihub_ids)))
+    print('found {} total scihub ids:'.format(len(scihub_ids)))
+    print('\n'.join(scihub_ids))
     #get local acquisitions
     print('querying es...')
     es_ids = get_es_objects(aoi, acq_index, track_number)
-    print('found {} total es ids.'.format(len(es_ids)))
+    print('found {} total es ids:'.format(len(es_ids)))
+    print('\n'.join(es_ids))
+    print("sets scihub_ids: {}".format(set(scihub_ids)))
+    print("sets es_ids: {}".format(set(es_ids)))
     #determine coverage differences
     diff = list(set(scihub_ids) - set(es_ids))
     missing_acqs = [scihub_results.get(i).get("slc_id") for i in diff]
     #see if intersection and if so then verify if we have the latest
     for existing in intersection(es_ids, scihub_ids):
         #compare ingestion times
+        print("es_result ingestion time: {}".format(es_results.get(existing).get("ingestion_time")))
+        print("scihub_result ingestion time: {}".format(scihub_results.get(existing).get("ingestion_time")))
         if dateutil.parser.parse(es_results.get(existing).get("ingestion_time")) < dateutil.parser.parse(scihub_results.get(existing).get("ingestion_time")):
             print("Outdated acquisition ID: {} \n Latest SLC Id: {}\nES Time: {}, SciHub Time: {}".format(existing, scihub_results.get(existing).get("slc_id"), es_results.get(existing).get("ingestion_time"), scihub_results.get(existing).get("ingestion_time")))
             latest_slcs.append(scihub_results.get(existing).get("slc_id"))
+    print("diff: {}".format(diff))
+    print("latest_slcs: {}".format(latest_slcs))
     if not diff and not latest_slcs:
         print('There are no missing acquisitions!')
     else:
@@ -51,7 +61,7 @@ def main(aoi_id, aoi_index, acq_index, track_number):
         print('Missing acquisitions:\n')
         for slc in diff:
             if isinstance(slc, dict):
-                for key,value in slc.iteritems():
+                for key,value in slc.items():
                     print("{}:{}".format(key, value))
                     print("{} , Ingestion Date : {}".format(scihub_results.get(key).get("slc_id")), scihub_results.get(key).get("ingestion_time"))
             else:
@@ -83,6 +93,7 @@ def get_scihub_objects(aoi, track_number):
         if total_results_expected is None:
             total_results_expected = int(results['feed']['opensearch:totalResults'])
         entries = results['feed'].get('entry', None)
+        #print("entries: {}".format(entries))
         if entries:
             for entry in entries:
                 for date in entry.get('date'):
@@ -99,16 +110,8 @@ def get_scihub_objects(aoi, track_number):
                     if i['name'] == 'relativeorbitnumber':
                         track_number = int(i['content'])
 
-                PLATFORM_RE = re.compile(r'S1(.+?)_')
-                match = PLATFORM_RE.search(entry.get('title'))
-                platform = "Sentinel-1%s" % match.group(1)
-
-                correct_start_time, correct_end_time = get_accurate_times(filename_str=entry.get("title"),
-                                                                          starttime_str=sensing_start,
-                                                                          endtime_str=sensing_stop)
-                id = "acquisition-{}_{}_{}_{}-esa_scihub".format(platform,
-                                                                 get_timestamp_for_filename(correct_start_time),
-                                                                track_number, mode)
+                title = entry.get('title')
+                id = "acquisition-{}-esa_scihub".format(title)
              
                 try:
                     if dateutil.parser.parse(scihub_results.get(id).get("ingestion_time")) < dateutil.parser.parse(ingest_date):
@@ -133,11 +136,11 @@ def convert_geojson(input_geojson):
             except:
                 raise Exception('unable to parse input geojson string: {0}'.format(input_geojson))
     #attempt to parse the coordinates to ensure a valid geojson
-    depth = lambda L: isinstance(L, list) and max(map(depth, L))+1
+    depth = lambda L: isinstance(L, list) and max(list(map(depth, L)))+1
     d = depth(input_geojson)
     try:
         # if it's a full geojson
-        if d is False and 'coordinates' in input_geojson.keys():
+        if d is False and 'coordinates' in list(input_geojson.keys()):
             polygon = MultiPolygon([Polygon(input_geojson['coordinates'][0])])
             return polygon
         else: # it's a list of coordinates
@@ -164,6 +167,7 @@ def get_es_objects(aoi, acq_index, track_number):
     location = aoi.get('_source', {}).get('location')
     grq_ip = app.conf['GRQ_ES_URL'].replace(':9200', '').replace('http://', 'https://')
     grq_url = '{0}/es/{1}/_search'.format(grq_ip, acq_index)
+    print("GRQ URL: {}".format(grq_url))
     grq_query = {"query":{"filtered":{"query":{"geo_shape":{"location": {"shape":location}}},
                                       "filter":{"bool":{"must":[{"term":{"metadata.track_number":track_number}},
                                                                 {"range":{"endtime":{"from":starttime}}},
@@ -209,12 +213,12 @@ def query_es(grq_url, es_query):
     all results are generated, & returns the compiled result
     '''
     # make sure the fields from & size are in the es_query
-    if 'size' in es_query.keys():
+    if 'size' in list(es_query.keys()):
         iterator_size = es_query['size']
     else:
         iterator_size = 1000
         es_query['size'] = iterator_size
-    if 'from' in es_query.keys():
+    if 'from' in list(es_query.keys()):
         from_position = es_query['from']
     else:
         from_position = 0
