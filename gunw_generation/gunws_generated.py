@@ -6,9 +6,12 @@ from collections import defaultdict
 from elasticsearch import Elasticsearch
 import datetime
 from dateutil.relativedelta import relativedelta
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def connect_to_host():
-    grq = Elasticsearch(GRQ_URL, verify_certs=False, read_timeout=50000, terminate_after=250)
+    grq = Elasticsearch(GRQ_URL, verify_certs=False)
     if not grq.ping():
         return 1
     return grq
@@ -61,18 +64,24 @@ def getGUNWCounts(aoi_list, start_time):
 
 def printTags(tags):
     total: int = 0
-    print("******************************************************")
-    print("GUNW products generated for each tag since %s" % start_time)
-    print()
-
-    for tag in tags:
+    if VERBOSE:
+        print("******************************************************")
+        print("GUNW products generated for each tag since %s" % start_time)
         print()
-        print("*****************************************************")
-        print(tag + ": " + str(len(tags[tag])))
-        total += int(len(tags[tag]))
-        if VERBOSE:
+
+        for tag in tags:
+            print()
+            print("*****************************************************")
+            print(tag + ": " + str(len(tags[tag])))
+            total += int(len(tags[tag]))
             for gunw in tags[tag]:
                 print(gunw)
+    else:
+        print("GUNW products generated for each tag since %s" % start_time)
+        print()
+        for tag in tags:
+            print(tag + ": " + str(len(tags[tag])))
+            total += int(len(tags[tag]))
     print()
     print("Total number of GUNW products for combined tags: %i" % total)
 
@@ -84,7 +93,8 @@ if __name__ == '__main__':
     parser.add_argument('--time', "--time", default="1d", help='Time range over which to look at to report gunw generation.')
 
     # Connection parameters
-    GRQ_URL = 'https://100.67.35.28/es/'
+    #GRQ_URL = 'https://100.67.35.28/es/'
+    GRQ_URL = 'http://100.67.35.28:9200'
 
     grq = connect_to_host()
     if grq == 1:
@@ -97,12 +107,8 @@ if __name__ == '__main__':
     aoi_list = validateAOIs(args.aoi)
     start_time = getTimeRange(args.time)
 
-    if args.verbose is not None:
+    if args.verbose:
         print("Verbose flag is set. GUNW ID\'s will be printed.")
         VERBOSE = True
 
     gunw_counts = getGUNWCounts(aoi_list, start_time)
-
-
-
-
